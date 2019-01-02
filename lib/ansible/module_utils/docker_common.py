@@ -20,7 +20,7 @@ import os
 import re
 from distutils.version import LooseVersion
 
-from ansible.module_utils.basic import AnsibleModule, env_fallback
+from ansible.module_utils.basic import AnsibleModule, env_fallback, jsonify
 from ansible.module_utils.six.moves.urllib.parse import urlparse
 from ansible.module_utils.parsing.convert_bool import BOOLEANS_TRUE, BOOLEANS_FALSE
 
@@ -103,6 +103,8 @@ BYTE_SUFFIXES = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
 
 if not HAS_DOCKER_PY:
+    docker_version = None
+
     # No docker-py. Create a place holder client to allow
     # instantiation of AnsibleModule and proper error handing
     class Client(object):  # noqa: F811
@@ -161,7 +163,8 @@ class AnsibleDockerClient(Client):
 
     def __init__(self, argument_spec=None, supports_check_mode=False, mutually_exclusive=None,
                  required_together=None, required_if=None, min_docker_version=MIN_DOCKER_VERSION,
-                 min_docker_api_version=None):
+                 min_docker_api_version=None, option_minimal_versions=None,
+                 option_minimal_versions_ignore_params=None):
 
         merged_arg_spec = dict()
         merged_arg_spec.update(DOCKER_COMMON_ARGS)
@@ -188,6 +191,8 @@ class AnsibleDockerClient(Client):
 
         NEEDS_DOCKER_PY2 = (LooseVersion(min_docker_version) >= LooseVersion('2.0.0'))
 
+        self.docker_py_version = LooseVersion(docker_version)
+
         if HAS_DOCKER_MODELS and HAS_DOCKER_SSLADAPTER:
             self.fail("Cannot have both the docker-py and docker python modules installed together as they use the same namespace and "
                       "cause a corrupt installation. Please uninstall both packages, and re-install only the docker-py or docker python "
@@ -201,7 +206,7 @@ class AnsibleDockerClient(Client):
                 msg = "Failed to import docker or docker-py - %s. Try `pip install docker` or `pip install docker-py` (Python 2.6)"
             self.fail(msg % HAS_DOCKER_ERROR)
 
-        if LooseVersion(docker_version) < LooseVersion(min_docker_version):
+        if self.docker_py_version < LooseVersion(min_docker_version):
             if NEEDS_DOCKER_PY2:
                 if docker_version < LooseVersion('2.0'):
                     msg = "Error: docker-py version is %s, while this module requires docker %s. Try `pip uninstall docker-py` and then `pip install docker`"
@@ -226,9 +231,13 @@ class AnsibleDockerClient(Client):
             self.fail("Error connecting: %s" % exc)
 
         if min_docker_api_version is not None:
-            docker_api_version = self.version()['ApiVersion']
-            if LooseVersion(docker_api_version) < LooseVersion(min_docker_api_version):
-                self.fail('docker API version is %s. Minimum version required is %s.' % (docker_api_version, min_docker_api_version))
+            self.docker_api_version_str = self.version()['ApiVersion']
+            self.docker_api_version = LooseVersion(self.docker_api_version_str)
+            if self.docker_api_version < LooseVersion(min_docker_api_version):
+                self.fail('docker API version is %s. Minimum version required is %s.' % (self.docker_api_version_str, min_docker_api_version))
+
+        if option_minimal_versions is not None:
+            self._get_minimal_versions(option_minimal_versions, option_minimal_versions_ignore_params)
 
     def log(self, msg, pretty_print=False):
         pass
@@ -411,6 +420,58 @@ class AnsibleDockerClient(Client):
                       % (self.auth_params['tls_hostname'], match.group(1), match.group(1)))
         self.fail("SSL Exception: %s" % (error))
 
+    def _get_minimal_versions(self, option_minimal_versions, ignore_params=None):
+        self.option_minimal_versions = dict()
+        for option in self.module.argument_spec:
+            if ignore_params is not None:
+                if option in ignore_params:
+                    continue
+            self.option_minimal_versions[option] = dict()
+        self.option_minimal_versions.update(option_minimal_versions)
+
+        for option, data in self.option_minimal_versions.items():
+            # Test whether option is supported, and store result
+            support_docker_py = True
+            support_docker_api = True
+            if 'docker_py_version' in data:
+                support_docker_py = self.docker_py_version >= LooseVersion(data['docker_py_version'])
+            if 'docker_api_version' in data:
+                support_docker_api = self.docker_api_version >= LooseVersion(data['docker_api_version'])
+            data['supported'] = support_docker_py and support_docker_api
+            # Fail if option is not supported but used
+            if not data['supported']:
+                # Test whether option is specified
+                if 'detect_usage' in data:
+                    used = data['detect_usage']()
+                else:
+                    used = self.module.params.get(option) is not None
+                    if used and 'default' in self.module.argument_spec[option]:
+                        used = self.module.params[option] != self.module.argument_spec[option]['default']
+                if used:
+                    # If the option is used, compose error message.
+                    if 'usage_msg' in data:
+                        usg = data['usage_msg']
+                    else:
+                        usg = 'set %s option' % (option, )
+                    if not support_docker_api:
+                        msg = 'docker API version is %s. Minimum version required is %s to %s.'
+                        msg = msg % (self.docker_api_version_str, data['docker_api_version'], usg)
+                    elif not support_docker_py:
+                        if LooseVersion(data['docker_py_version']) < LooseVersion('2.0.0'):
+                            msg = ("docker-py version is %s. Minimum version required is %s to %s. "
+                                   "Consider switching to the 'docker' package if you do not require Python 2.6 support.")
+                        elif self.docker_py_version < LooseVersion('2.0.0'):
+                            msg = ("docker-py version is %s. Minimum version required is %s to %s. "
+                                   "You have to switch to the Python 'docker' package. First uninstall 'docker-py' before "
+                                   "installing 'docker' to avoid a broken installation.")
+                        else:
+                            msg = "docker version is %s. Minimum version required is %s to %s."
+                        msg = msg % (docker_version, data['docker_py_version'], usg)
+                    else:
+                        # should not happen
+                        msg = 'Cannot %s with your configuration.' % (usg, )
+                    self.fail(msg)
+
     def get_container(self, name=None):
         '''
         Lookup a container and return the inspection results.
@@ -449,6 +510,45 @@ class AnsibleDockerClient(Client):
                 return None
             except Exception as exc:
                 self.fail("Error inspecting container: %s" % exc)
+
+        return result
+
+    def get_network(self, name=None, id=None):
+        '''
+        Lookup a network and return the inspection results.
+        '''
+        if name is None and id is None:
+            return None
+
+        result = None
+
+        if id is None:
+            try:
+                for network in self.networks():
+                    self.log("testing network: %s" % (network['Name']))
+                    if name == network['Name']:
+                        result = network
+                        break
+                    if network['Id'].startswith(name):
+                        result = network
+                        break
+            except SSLError as exc:
+                self._handle_ssl_error(exc)
+            except Exception as exc:
+                self.fail("Error retrieving network list: %s" % exc)
+
+        if result is not None:
+            id = result['Id']
+
+        if id is not None:
+            try:
+                self.log("Inspecting network Id %s" % id)
+                result = self.inspect_network(id)
+                self.log("Completed network inspection")
+            except NotFound as exc:
+                return None
+            except Exception as exc:
+                self.fail("Error inspecting network: %s" % exc)
 
         return result
 
@@ -646,3 +746,74 @@ def compare_generic(a, b, method, type):
                 if not found:
                     return False
         return True
+
+
+class DifferenceTracker(object):
+    def __init__(self):
+        self._diff = []
+
+    def add(self, name, parameter=None, active=None):
+        self._diff.append(dict(
+            name=name,
+            parameter=parameter,
+            active=active,
+        ))
+
+    def merge(self, other_tracker):
+        self._diff.extend(other_tracker._diff)
+
+    @property
+    def empty(self):
+        return len(self._diff) == 0
+
+    def get_before_after(self):
+        '''
+        Return texts ``before`` and ``after``.
+        '''
+        before = dict()
+        after = dict()
+        for item in self._diff:
+            before[item['name']] = item['active']
+            after[item['name']] = item['parameter']
+        return before, after
+
+    def get_legacy_docker_container_diffs(self):
+        '''
+        Return differences in the docker_container legacy format.
+        '''
+        result = []
+        for entry in self._diff:
+            item = dict()
+            item[entry['name']] = dict(
+                parameter=entry['parameter'],
+                container=entry['active'],
+            )
+            result.append(item)
+        return result
+
+    def get_legacy_docker_diffs(self):
+        '''
+        Return differences in the docker_container legacy format.
+        '''
+        result = [entry['name'] for entry in self._diff]
+        return result
+
+
+def clean_dict_booleans_for_docker_api(data):
+    '''
+    Go doesn't like Python booleans 'True' or 'False', while Ansible is just
+    fine with them in YAML. As such, they need to be converted in cases where
+    we pass dictionaries to the Docker API (e.g. docker_network's
+    driver_options and docker_prune's filters).
+    '''
+    result = dict()
+    if data is not None:
+        for k, v in data.items():
+            if v is True:
+                v = 'true'
+            elif v is False:
+                v = 'false'
+            else:
+                v = str(v)
+            result[str(k)] = v
+    return result

@@ -249,12 +249,12 @@ RETURN = '''
 privatekey:
     description: Path to the TLS/SSL private key the CSR was generated for
     returned: changed or success
-    type: string
+    type: str
     sample: /etc/ssl/private/ansible.com.pem
 filename:
     description: Path to the generated Certificate Signing Request
     returned: changed or success
-    type: string
+    type: str
     sample: /etc/ssl/csr/www.ansible.com.csr
 subject:
     description: A list of the subject tuples attached to the CSR
@@ -529,13 +529,13 @@ def main():
             organizationalUnitName=dict(aliases=['OU', 'organizational_unit_name'], type='str'),
             commonName=dict(aliases=['CN', 'common_name'], type='str'),
             emailAddress=dict(aliases=['E', 'email_address'], type='str'),
-            subjectAltName=dict(aliases=['subject_alt_name'], type='list'),
+            subjectAltName=dict(aliases=['subject_alt_name'], type='list', elements='str'),
             subjectAltName_critical=dict(aliases=['subject_alt_name_critical'], default=False, type='bool'),
-            keyUsage=dict(aliases=['key_usage'], type='list'),
+            keyUsage=dict(aliases=['key_usage'], type='list', elements='str'),
             keyUsage_critical=dict(aliases=['key_usage_critical'], default=False, type='bool'),
             extendedKeyUsage=dict(aliases=['extKeyUsage', 'extended_key_usage'], type='list'),
-            extendedKeyUsage_critical=dict(aliases=['extKeyUsage_critical', 'extended_key_usage_critical'], default=False, type='bool'),
-            basicConstraints=dict(aliases=['basic_constraints'], type='list'),
+            extendedKeyUsage_critical=dict(aliases=['extKeyUsage_critical', 'extended_key_usage_critical'], default=False, type='bool', elements='str'),
+            basicConstraints=dict(aliases=['basic_constraints'], type='list', elements='str'),
             basicConstraints_critical=dict(aliases=['basic_constraints_critical'], default=False, type='bool'),
             ocspMustStaple=dict(aliases=['ocsp_must_staple'], default=False, type='bool'),
             ocspMustStaple_critical=dict(aliases=['ocsp_must_staple_critical'], default=False, type='bool'),

@@ -100,7 +100,7 @@ RETURN = '''
 id:
     description: ID of the storage connection which is managed
     returned: On success if storage connection is found.
-    type: string
+    type: str
     sample: 7de90f31-222c-436c-a1ca-7e655bd5b60c
 storage_connection:
     description: "Dictionary of all the storage connection attributes. Storage connection attributes can be found on your oVirt instance
@@ -176,7 +176,6 @@ class StorageConnectionModule(BaseModule):
             equal(self.param('nfs_timeout'), entity.nfs_timeo) and
             equal(self.param('nfs_retrans'), entity.nfs_retrans) and
             equal(self.param('mount_options'), entity.mount_options) and
-            equal(self.param('password'), entity.password) and
             equal(self.param('username'), entity.username) and
             equal(self.param('port'), entity.port) and
             equal(self.param('target'), entity.target) and

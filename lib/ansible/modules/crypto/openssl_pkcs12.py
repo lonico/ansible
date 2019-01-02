@@ -129,12 +129,12 @@ RETURN = '''
 filename:
     description: Path to the generate PKCS#12 file.
     returned: changed or success
-    type: string
+    type: str
     sample: /opt/certs/ansible.p12
 privatekey:
     description: Path to the TLS/SSL private key the public key was generated from
     returned: changed or success
-    type: string
+    type: str
     sample: /etc/ssl/private/ansible.com.pem
 '''
 
@@ -278,7 +278,7 @@ def main():
     argument_spec = dict(
         action=dict(type='str', default='export',
                     choices=['parse', 'export']),
-        ca_certificates=dict(type='list'),
+        ca_certificates=dict(type='list', elements='path'),
         certificate_path=dict(type='path'),
         force=dict(type='bool', default=False),
         friendly_name=dict(type='str', aliases=['name']),

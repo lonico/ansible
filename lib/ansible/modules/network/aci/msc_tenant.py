@@ -23,22 +23,28 @@ options:
   tenant_id:
     description:
     - The ID of the tenant.
-    required: yes
+    type: str
   tenant:
     description:
     - The name of the tenant.
+    - Alternative to the name, you can use C(tenant_id).
+    type: str
     required: yes
     aliases: [ name, tenant_name ]
   display_name:
     description:
     - The name of the tenant to be displayed in the web UI.
+    type: str
+    required: yes
   description:
     description:
     - The description for this tenant.
+    type: str
   state:
     description:
     - Use C(present) or C(absent) for adding or removing.
     - Use C(query) for listing an object or multiple objects.
+    type: str
     choices: [ absent, present, query ]
     default: present
 extends_documentation_fragment: msc
@@ -52,7 +58,8 @@ EXAMPLES = r'''
     password: SomeSecretPassword
     tenant: north_europe
     tenant_id: 101
-    description: North European Datacenter
+    display_name: North European Datacenter
+    description: This tenant manages the NEDC environment.
     state: present
   delegate_to: localhost
 
@@ -134,7 +141,7 @@ def main():
         msc.existing = msc.get_obj(path, id=tenant_id)
         existing_by_name = msc.get_obj(path, name=tenant)
         if existing_by_name and tenant_id != existing_by_name['id']:
-            msc.fail_json(msg="Provided tenant '{1}' with id '{2}' does not match existing id '{3}'.".format(tenant, tenant_id, existing_by_name['id']))
+            msc.fail_json(msg="Provided tenant '{0}' with id '{1}' does not match existing id '{2}'.".format(tenant, tenant_id, existing_by_name['id']))
 
     # If we found an existing object, continue with it
     if tenant_id:
@@ -154,14 +161,20 @@ def main():
     elif state == 'present':
         msc.previous = msc.existing
 
-        msc.sanitize(dict(
+        payload = dict(
             description=description,
             id=tenant_id,
             name=tenant,
             displayName=display_name,
             siteAssociations=[],
             userAssociations=[dict(userId="0000ffff0000000000000020")],
-        ))
+        )
+
+        msc.sanitize(payload, collate=True)
+
+        # Ensure displayName is not undefined
+        if msc.sent.get('displayName') is None:
+            msc.sent['displayName'] = tenant
 
         if msc.existing:
             if not issubset(msc.sent, msc.existing):

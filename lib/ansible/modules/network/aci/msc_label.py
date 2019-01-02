@@ -23,24 +23,25 @@ options:
   label_id:
     description:
     - The ID of the label.
-    required: yes
+    type: str
   label:
     description:
     - The name of the label.
+    - Alternative to the name, you can use C(label_id).
+    type: str
     required: yes
     aliases: [ label_name, name ]
-  display_name:
-    description:
-    - The name of the label displayed in the web UI.
   type:
     description:
     - The type of the label.
+    type: str
     choices: [ site ]
     default: site
   state:
     description:
     - Use C(present) or C(absent) for adding or removing.
     - Use C(query) for listing an object or multiple objects.
+    type: str
     choices: [ absent, present, query ]
     default: present
 extends_documentation_fragment: msc
@@ -52,9 +53,8 @@ EXAMPLES = r'''
     host: msc_host
     username: admin
     password: SomeSecretPassword
-    name: north_europe
-    label_id: 101
-    description: North European Datacenter
+    label: Belgium
+    type: site
     state: present
   delegate_to: localhost
 
@@ -63,7 +63,7 @@ EXAMPLES = r'''
     host: msc_host
     username: admin
     password: SomeSecretPassword
-    name: north_europe
+    label: Belgium
     state: absent
   delegate_to: localhost
 
@@ -72,7 +72,7 @@ EXAMPLES = r'''
     host: msc_host
     username: admin
     password: SomeSecretPassword
-    name: north_europe
+    label: Belgium
     state: query
   delegate_to: localhost
   register: query_result
@@ -99,7 +99,6 @@ def main():
     argument_spec.update(
         label=dict(type='str', required=False, aliases=['name', 'label_name']),
         label_id=dict(type='str', required=False),
-        display_name=dict(type='str'),
         type=dict(type='str', default='site', choices=['site']),
         state=dict(type='str', default='present', choices=['absent', 'present', 'query']),
     )
@@ -116,7 +115,6 @@ def main():
     label = module.params['label']
     label_id = module.params['label_id']
     label_type = module.params['type']
-    display_name = module.params['display_name']
     state = module.params['state']
 
     msc = MSCModule(module)
@@ -136,7 +134,7 @@ def main():
         msc.existing = msc.get_obj(path, id=label_id)
         existing_by_name = msc.get_obj(path, displayName=label)
         if existing_by_name and label_id != existing_by_name['id']:
-            msc.fail_json(msg="Provided label '{1}' with id '{2}' does not match existing id '{3}'.".format(label, label_id, existing_by_name['id']))
+            msc.fail_json(msg="Provided label '{0}' with id '{1}' does not match existing id '{2}'.".format(label, label_id, existing_by_name['id']))
 
     # If we found an existing object, continue with it
     if label_id:
@@ -156,11 +154,13 @@ def main():
     elif state == 'present':
         msc.previous = msc.existing
 
-        msc.sanitize(dict(
+        payload = dict(
             id=label_id,
-            displayName=display_name,
+            displayName=label,
             type=label_type,
-        ), collate=True)
+        )
+
+        msc.sanitize(payload, collate=True)
 
         if msc.existing:
             if not issubset(msc.sent, msc.existing):
